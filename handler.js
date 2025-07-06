@@ -698,6 +698,59 @@ module.exports = {
             responseMessage += '*╰┈┈┈┈┈┈┈┈*';
             m.reply(responseMessage);
             break
+          case 'wd':
+            if (!isCreator) return m.reply(globalSettings.mess.owner); // ✅ Hanya owner
+            if (m.isGroup) return m.reply(globalSettings.mess.private); // ✅ Hanya private chat
+
+            const [codeArg,
+              targetArg] = args;
+
+            if (!codeArg || !targetArg) {
+              return m.reply(`⚠️ Format salah.\nGunakan: ${pric}wd <code> <target>\n\nContoh: ${pric}wd PLN50 081234567890`);
+            }
+
+            // Validasi target harus angka dan minimal 8 digit
+            if (!/^\d{8,20}$/.test(targetArg)) {
+              return m.reply(`⚠️ Target harus berupa angka dan minimal 8 digit.\nContoh: 081234567890 atau ID pelanggan PLN.`);
+            }
+
+            const aapiKey = 'hsh8P9MFZKND0uZyCF4w0txe5yatMDVkFknUXJmpAmDTBdRKpmtqeyQO70wpFAxDZVJ5zs3hEfm9wa2OaSq0OWaycdxjGumhmz8X';
+            const reffId = Math.random().toString(36).substr(2, 10).toUpperCase();
+
+            try {
+              const response = await axios.post('https://atlantich2h.com/transaksi/create', qs.stringify({
+                api_key: aapiKey,
+                code: codeArg,
+                reff_id: reffId,
+                target: targetArg
+              }), {
+                headers: {
+                  'Content-Type': 'application/x-www-form-urlencoded'
+                }
+              });
+
+              console.log("=== LOG RESPONSE WD ===");
+              console.log(response.data);
+              console.log("=======================");
+
+              if (response.data.status) {
+                const data = response.data.data;
+                let message = `*✅ TRANSAKSI BERHASIL DIBUAT!*\n\n` +
+                `- Code: *${codeArg}*\n` +
+                `- Target: *${targetArg}*\n` +
+                `- Reff ID: *${reffId}*\n` +
+                `- Status: *${data.status || 'N/A'}*\n\n` +
+                `Silakan cek detail di panel Atlantic H2H. 🚀`;
+                m.reply(message);
+              } else {
+                m.reply(`⚠️ Gagal membuat transaksi.\nPesan: ${response.data.message || 'Tidak diketahui'}`);
+              }
+
+            } catch (err) {
+              console.error('❌ Error transaksi WD:', err);
+              m.reply('❌ Terjadi kesalahan saat membuat transaksi. (Error server Atlantic H2H atau parameter tidak valid). Silakan coba lagi atau hubungi admin.');
+            }
+            break
           case 'addstock':
           case 'addstok':
             if (!isCreator) return m.reply(globalSettings.mess.owner);
