@@ -1046,6 +1046,7 @@ module.exports = {
               return m.reply(`Gagal membeli. Produk dengan kode '${beliCode}' tidak ditemukan.`);
             }
 
+            // Bersihkan reservasi yang expired
             let cleaned = false;
             beliStock.accounts = beliStock.accounts.map(acc => {
               if (acc.reservedUntil && new Date(acc.reservedUntil) < new Date()) {
@@ -1063,7 +1064,6 @@ module.exports = {
               return m.reply(`Maaf, stok dengan kode ${beliCode} hanya tersedia ${availableAccounts.length} stok yang belum direservasi.`);
             }
 
-            // 🔥 Validasi minimal Rp2.000
             const hargaAwal = beliStock.price * beliAmount;
             if (beliStock.price < 2000 && hargaAwal < 2000) {
               const minimalQty = Math.ceil(2000 / beliStock.price);
@@ -1092,7 +1092,6 @@ module.exports = {
 
             try {
               const apiKey = 'hsh8P9MFZKND0uZyCF4w0txe5yatMDVkFknUXJmpAmDTBdRKpmtqeyQO70wpFAxDZVJ5zs3hEfm9wa2OaSq0OWaycdxjGumhmz8X';
-
               const createResponse = await axios.post('https://atlantich2h.com/deposit/create', qs.stringify({
                 api_key: apiKey,
                 reff_id: kode_unik,
@@ -1128,26 +1127,217 @@ module.exports = {
                 const invoiceMessages = await conn.sendMessage(
                   m.chat,
                   {
-                    image: qrBuffer,
-                    caption: caption + `\n*Scan QR di atas untuk pembayaran*`
+                    image: qrBuffer, caption: caption + `\n*Scan QR di atas untuk pembayaran*`
                   }
                 );
 
-                startPaymentStatusCheck(user, m, conn, beliStock, beliCode, beliAmount, totalharga, kode_unik, formatDesc, invoiceMessages, apiKey);
+                let attempts = 0;
+                const maxAttempts = 36;
+
+                const checkInterval = setInterval(async () => {
+                  attempts++;
+
+                  try {
+                    const statusResponse = await axios.post('https://atlantich2h.com/deposit/status', qs.stringify({
+                      api_key: apiKey,
+                      id: user.depositId
+                    }), {
+                      headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                      }
+                    });
+
+                    console.log(`=== LOG STATUS CHECK (Attempt ${attempts}) ===`);
+                    console.log(statusResponse.data);
+                    console.log("==========================================");
+
+                    if (statusResponse.data.status &&
+                      (statusResponse.data.data.status === 'success' || statusResponse.data.data.status === 'processing')) {
+
+                      clearInterval(checkInterval);
+
+                      try {
+                        const instantRes = await axios.post('https://atlantich2h.com/deposit/instant', qs.stringify({
+                          api_key: apiKey,
+                          id: user.depositId,
+                          action: true
+                        }), {
+                          headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                          }
+                        });
+
+                        console.log("=== LOG RESPONSE INSTANT CONFIRMATION ===");
+                        console.log(instantRes.data);
+                        console.log("=========================================");
+                      } catch (err) {
+                        console.error("❌ Gagal konfirmasi instant:", err.message);
+                      }
+
+                      user.buynow = 'Done';
+                      delete user.qrbuy;
+                      delete user.depositId;
+
+                      const beliStockFinal = db_stock_list.find(stock => stock.code === beliCode);
+                      if (beliStockFinal) {
+                        user.lockedAccounts.forEach(acc => {
+                          const index = beliStockFinal.accounts.findIndex(a => a.user === acc.user && a.pass === acc.pass);
+                          if (index !== -1) {
+                            beliStockFinal.accounts.splice(index, 1);
+                          }
+                        });
+
+                        beliStockFinal.stockSold = (beliStockFinal.stockSold || 0) + user.lockedAccounts.length;
+                        beliStockFinal.totalStock = beliStockFinal.accounts.length;
+
+                        saveDB(db_stock_list);
+                      }
+
+                      const akunList = user.lockedAccounts.map((acc, i) => `*${i + 1}.* ${acc.user}|${acc.pass}`).join('\n');
+                      const successMessage =
+                      `*✅ PEMBAYARAN BERHASIL!*\n\n` +
+                      `${formatDesc}\n\n` +
+                      `*┏━━━━━━━━━━━━━━━━━━━*\n` +
+                      `*┊ Detail Akun Anda ┊*\n` +
+                      `*┣━━━━━━━━━━━━━━━━━━━*\n` +
+                      `${akunList}\n` +
+                      `*┗━━━━━━━━━━━━━━━━━━━*\n\n` +
+                      `Status Pembayaran: *${statusResponse.data.data.status.toUpperCase()}*\n` +
+                      `Terima kasih telah berbelanja di toko kami! 🎉`;
+
+                      await conn.sendMessage(m.chat,
+                        {
+                          text: successMessage
+                        },
+                        {
+                          quoted: invoiceMessages
+                        });
+
+                      delete user.lockedAccounts;
+                    }
+
+                    if (attempts >= maxAttempts) {
+                      clearInterval(checkInterval);
+                      console.log("❌ Waktu cek status habis. Pembayaran tidak diterima.");
+                      m.reply('⚠️ Batas waktu pembayaran habis. Silakan coba beli ulang.');
+                    }
+
+                  } catch (err) {
+                    console.error(`❌ Error cek status (Attempt ${attempts}):`, err.message);
+                  }
+
+                },
+                  5000);
 
               } catch (qrError) {
-                console.error('❌ Error generate QR:', qrError);
+                console.error('❌ Error generate QR:',
+                  qrError);
                 const invoiceMessages = await conn.sendMessage(
                   m.chat,
                   {
                     text: caption + `\n*Kode QRIS:*\n\`\`\`${depositData.qr_string}\`\`\``
                   }
                 );
-                startPaymentStatusCheck(user, m, conn, beliStock, beliCode, beliAmount, totalharga, kode_unik, formatDesc, invoiceMessages, apiKey);
+
+                // Tetap jalankan pengecekan status jika fallback QR string
+                let attempts = 0;
+                const maxAttempts = 36;
+
+                const checkInterval = setInterval(async () => {
+                  attempts++;
+
+                  try {
+                    const statusResponse = await axios.post('https://atlantich2h.com/deposit/status', qs.stringify({
+                      api_key: apiKey,
+                      id: user.depositId
+                    }), {
+                      headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded'
+                      }
+                    });
+
+                    if (statusResponse.data.status &&
+                      (statusResponse.data.data.status === 'success' || statusResponse.data.data.status === 'processing')) {
+
+                      clearInterval(checkInterval);
+
+                      try {
+                        const instantRes = await axios.post('https://atlantich2h.com/deposit/instant', qs.stringify({
+                          api_key: apiKey,
+                          id: user.depositId,
+                          action: true
+                        }), {
+                          headers: {
+                            'Content-Type': 'application/x-www-form-urlencoded'
+                          }
+                        });
+
+                        console.log("=== LOG RESPONSE INSTANT CONFIRMATION ===");
+                        console.log(instantRes.data);
+                        console.log("=========================================");
+                      } catch (err) {
+                        console.error("❌ Gagal konfirmasi instant:", err.message);
+                      }
+
+                      user.buynow = 'Done';
+                      delete user.qrbuy;
+                      delete user.depositId;
+
+                      const beliStockFinal = db_stock_list.find(stock => stock.code === beliCode);
+                      if (beliStockFinal) {
+                        user.lockedAccounts.forEach(acc => {
+                          const index = beliStockFinal.accounts.findIndex(a => a.user === acc.user && a.pass === acc.pass);
+                          if (index !== -1) {
+                            beliStockFinal.accounts.splice(index, 1);
+                          }
+                        });
+
+                        beliStockFinal.stockSold = (beliStockFinal.stockSold || 0) + user.lockedAccounts.length;
+                        beliStockFinal.totalStock = beliStockFinal.accounts.length;
+
+                        saveDB(db_stock_list);
+                      }
+
+                      const akunList = user.lockedAccounts.map((acc, i) => `*${i + 1}.* ${acc.user}|${acc.pass}`).join('\n');
+                      const successMessage =
+                      `*✅ PEMBAYARAN BERHASIL!*\n\n` +
+                      `${formatDesc}\n\n` +
+                      `*┏━━━━━━━━━━━━━━━━━━━*\n` +
+                      `*┊ Detail Akun Anda ┊*\n` +
+                      `*┣━━━━━━━━━━━━━━━━━━━*\n` +
+                      `${akunList}\n` +
+                      `*┗━━━━━━━━━━━━━━━━━━━*\n\n` +
+                      `Status Pembayaran: *${statusResponse.data.data.status.toUpperCase()}*\n` +
+                      `Terima kasih telah berbelanja di toko kami! 🎉`;
+
+                      await conn.sendMessage(m.chat,
+                        {
+                          text: successMessage
+                        },
+                        {
+                          quoted: invoiceMessages
+                        });
+
+                      delete user.lockedAccounts;
+                    }
+
+                    if (attempts >= maxAttempts) {
+                      clearInterval(checkInterval);
+                      console.log("❌ Waktu cek status habis. Pembayaran tidak diterima.");
+                      m.reply('⚠️ Batas waktu pembayaran habis. Silakan coba beli ulang.');
+                    }
+
+                  } catch (err) {
+                    console.error(`❌ Error cek status (Attempt ${attempts}):`, err.message);
+                  }
+
+                },
+                  5000);
               }
 
             } catch (err) {
-              console.error('❌ Error proses pembelian:', err);
+              console.error('❌ Error proses pembelian:',
+                err);
 
               selectedAccounts.forEach(acc => delete acc.reservedUntil);
               saveDB(db_stock_list);
