@@ -1,0 +1,46 @@
+[
+   {
+      "code": "docc",
+      "name": "DIGITAL OCEAN 10 DROPLET SALDO 200$",
+      "price": 2000,
+      "description": "SALDO SUDAH TERISI 200$",
+      "stockSold": 0,
+      "totalStock": 2,
+      "accounts": [
+         {
+            "user": "beaforidan@gmail.com",
+            "pass": "@Mbahfauzi2025",
+            "date": "2025-07-06T14:41:41.977Z",
+            "notes": [
+               "untuk kode login 6 digit masuk ke website 2fa.live dan pastekan kode berikut = 22"
+            ]
+         },
+         {
+            "user": "beaforidan@gmail.com",
+            "pass": "@Mbahfauzi2025",
+            "date": "2025-07-06T14:44:11.969Z",
+            "notes": [
+               "untuk kode login 6 digit masuk ke website 2fa.live dan pastekan kode berikut = 22"
+            ]
+         }
+      ]
+   },
+   {
+      "code": "gmail",
+      "name": "gmail",
+      "price": 1000,
+      "description": "gmail",
+      "stockSold": 0,
+      "totalStock": 1,
+      "accounts": [
+         {
+            "user": "beaforidan@gmail.com",
+            "pass": "@Mbahfauzi2025",
+            "date": "2025-07-06T16:05:52.908Z",
+            "notes": [
+               "untuk kode login 6 digit masuk ke website 2fa.live dan pastekan kode berikut = 22"
+            ]
+         }
+      ]
+   }
+]
